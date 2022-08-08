@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/5.1.3/pixi.min.js"></script>
+</head>
+
+<body>
+    <div id="app"></div>
+    <script>
+        // 寬高
+        const app_w = window.innerWidth
+        const app_h = window.innerHeight
+
+        // 中間
+        const center_x = app_w / 2;
+        const twoPercent_h = app_h / 50;
+
+        // 延展距離
+        const stretch_factor = 1200 / app_h;
+
+        // y 間距
+        const y_speed = 3 / stretch_factor;
+
+        const random = (min, max) => {
+            return Math.random() * (max - min) + min;
+        }
+
+        const randomTreeColor = () => {
+            const red = Math.round(random(40, 120))
+            const green = Math.round(random(100, 255))
+            const blue = Math.round(random(60, 200))
+
+            const strHex = red.toString(16).padStart(2, '0') + green.toString(16).padStart(2, '0') + blue.toString(16).padStart(2, '0')
+            return `0x${strHex}`;
+        };
+
+        // PIXI
+        const app = new PIXI.Application({
+            width: app_w, height: app_h, antialias: true, transparent: true
+        });
+
+        const sprites = new PIXI.ParticleContainer(100000, {
+            scale: true,
+            position: true,
+            rotation: true,
+            uvs: true,
+            alpha: true,
+        });
+        // sprites.blendMode = PIXI.BLEND_MODES.ADD;
+        app.stage.addChild(sprites);
+
+        document.querySelector('#app').appendChild(app.view);
+
+        class Vector {
+            constructor(x, y) {
+                this.x = x || 0;
+                this.y = y || 0;
+            }
+            add(vector) {
+                this.x += vector.x;
+                this.y += vector.y;
+            }
+            length() {
+                return Math.sqrt(this.x * this.x + this.y * this.y);
+            }
+            rotate(theta) {
+                this.x = Math.cos(theta) * this.x - Math.sin(theta) * this.y;
+                this.y = Math.sin(theta) * this.x + Math.cos(theta) * this.y
+
+                return this;
+            }
+        }
+
+        class Leaf {
+            constructor(vector, radius, color, sprites) {
+                this.vector = vector;
+                this.radius = radius;
+                this.color = color;
+                this.sprites = sprites;
+            }
+            render() {
+                const circle = new PIXI.Graphics();
+                circle.beginFill(0xffffff);
+                circle.drawCircle(0, 0, this.radius);
+                circle.endFill();
+
+                const texture = app.renderer.generateTexture(circle);
+                const dude = new PIXI.Sprite(texture);
+
+                dude.tint = this.color;
+                dude.alpha = Number(`0.${Math.floor(random(4, 8))}`)
+                dude.anchor.set(0.5);
+                const x = this.vector.x + random(-20, 20)
+                const y = this.vector.y + random(-20, 20)
+                dude.x = x;
+                dude.y = y;
+
+                this.sprites.addChild(dude);
+            }
+        }
+
+        class Branch {
+            constructor(vector, next_vector, r, generation, color, tree) {
+                this.vector = vector
+                this.next_vector = next_vector
+
+                let radius = { r }
+                this.radius = new Proxy(radius, {
+                    set: (obj, prop, value) => {
+                        if (value < 0.8 /* || this.generation > 10 */) {
+                            this.tree.removeBranch(this);
+                            for (let i = 0; i < random(1, 3); i++) {
+                                const leaf = new Leaf(this.vector, Math.floor(random(1, 3)), this.color, this.tree.sprites);
+                                leaf.render();
+                            }
+                        }
+
+                        obj[prop] = value;
+                        return true;
+                    }
+                });
+
+                this.generation = generation // 初始分枝
+                this.angle = this.generation > 1 ? 0.16 - (0.10 / this.generation) : 0.13 - (0.10 / this.generation);
+
+                this.length = 0;
+                this.length_limit = this.generation > 1 ? random(twoPercent_h * 6.2, twoPercent_h * 10.2) : random(twoPercent_h * 8.2, twoPercent_h * 11.2)
+
+                this.leaf_frequency = 0 // 葉子產生頻率 ( += length )
+                this.leaf_random = this.generation > 2 ? { limit: [8, 12], amount: [2, 4] } : { limit: [18, 22], amount: [1, 2] }
+
+                this.tree = tree
+                this.color = color
+                this.register();
+            }
+            register() {
+                // 加入樹枝陣列
+                this.generation > 1 ? this.tree.branches.push(this) : this.tree.first_branches.push(this);
+            }
+
+            first_grow() {
+                // generation === 1 渲染
+                this.draw();
+
+                this.modify();
+
+                this.first_fork();
+            }
+
+            first_fork() {
+                const p = this.length - this.length_limit
+
+                if (p > 0) {
+                    const fork_amount = Math.round(random(1, 3));
+
+                    for (let i = 0; i < fork_amount; i++) {
+                        this.clone(this);
+                    }
+
+                    this.tree.remove_fist_branch(this);
+                }
+            }
+
+            draw() {
+                const circle = new PIXI.Graphics();
+                circle.beginFill(0xffffff);
+                circle.drawCircle(0, 0, this.radius.r);
+                circle.endFill();
+
+                const texture = app.renderer.generateTexture(circle);
+
+                const dude = new PIXI.Sprite(texture);
+
+                dude.tint = this.color;
+                dude.alpha = 0.2;
+                dude.anchor.set(0.5);
+                dude.x = this.vector.x;
+                dude.y = this.vector.y;
+
+                sprites.addChild(dude);
+            }
+
+            modify() {
+                this.vector.add(this.next_vector);
+
+                this.length += this.next_vector.length();
+
+                this.leaf_frequency += this.next_vector.length();
+
+                // 半徑越來越小
+                if (Math.abs(this.vector.x - center_x) < center_x / 10) {
+                    this.angle = 0.18 - (0.10 / this.generation);
+                    this.radius.r *= 0.991;
+                } else {
+                    this.radius.r *= 0.99;
+                }
+
+                this.next_vector.rotate(random(-this.angle, this.angle));
+            }
+
+            leaf() {
+                if (this.leaf_frequency > random(...this.leaf_random.limit)) {
+                    this.leaf_frequency = 0
+
+                    for (let i = 0; i < random(...this.leaf_random.amount); i++) {
+                        const leaf = new Leaf(this.vector, Math.floor(random(2, 5)), this.color, this.tree.sprites);
+                        leaf.render();
+                    }
+                }
+            }
+
+            grow() {
+                this.draw();
+
+                this.modify();
+
+                this.leaf()
+
+                this.fork();
+            }
+
+            fork() {
+                // 判斷樹枝長多長要分岔
+                // this.length 每次約增加 0 - 3 之間，若超過 random(min, max) 則分枝
+                // 要超過的長度越小，則分枝次數越多
+                const p = this.length - this.length_limit
+
+                if (p > 0) {
+                    const n = Math.round(random(1, 3));
+
+                    for (let i = 0; i < n; i++) {
+                        this.clone(this);
+                    }
+
+                    // 每次分枝將原樹枝移除
+                    this.tree.removeBranch(this);
+                }
+            }
+            clone(oldBranch) {
+                const r = new Branch(new Vector(oldBranch.vector.x, oldBranch.vector.y), new Vector(oldBranch.next_vector.x, oldBranch.next_vector.y), oldBranch.radius.r, oldBranch.generation + 1, randomTreeColor(), oldBranch.tree);
+            }
+        }
+
+        class Tree {
+            constructor(sprites) {
+                this.sprites = sprites
+
+                this.first_branches = [] // generation === 1
+                this.branches = []; // generation >= 2
+
+                this.is_render = false // 是否已執行 render 函式
+            }
+
+            remove_fist_branch(branch) {
+                const index = this.first_branches.indexOf(branch)
+                this.first_branches.splice(index, 1);
+                if (this.is_render === false) {
+                    this.is_render = true
+                    this.render()
+                }
+            }
+
+            removeBranch(branch) {
+                const index = this.branches.indexOf(branch)
+                this.branches.splice(index, 1);
+            };
+
+            draw(amount) {
+                for (let i = 0; i < amount; i++) {
+                    new Branch(new Vector(center_x + random(-12, 12), app_h), new Vector(Math.random(), -y_speed), 15 / stretch_factor, 1, randomTreeColor(), this);
+                }
+
+                const step = () => {
+                    if (this.first_branches.length > 0) {
+                        this.first_branches.forEach(el => {
+                            el.first_grow();
+                        });
+                        window.requestAnimationFrame(step)
+                    }
+                }
+                window.requestAnimationFrame(step)
+            }
+
+            render() {
+                const step = () => {
+                    if (this.branches.length > 0) {
+                        this.branches.forEach(el => {
+                            el.grow();
+                        });
+                        window.requestAnimationFrame(step)
+                    }
+                }
+                window.requestAnimationFrame(step)
+            };
+        }
+
+        const tree = new Tree(sprites);
+
+        tree.draw(6);
+    </script>
+</body>
+
+</html>
